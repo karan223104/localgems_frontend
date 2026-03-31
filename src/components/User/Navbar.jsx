@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
 import { toast } from "react-toastify";
+import axios from "axios";
 
 export const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
-
   const [isOpen, setIsOpen] = useState(false);
 
   const getUser = () => {
@@ -17,21 +17,52 @@ export const Navbar = () => {
     }
   };
 
-  const [user, setUser] = useState(getUser);
+  const [user, setUser] = useState(null);
 
+  // Listen for login/logout changes and validate token
   useEffect(() => {
-    setUser(getUser());
-  }, [location.pathname]);
+    const handleAuth = async () => {
+      const storedUser = getUser();
 
-  useEffect(() => {
-    const handleAuth = () => setUser(getUser());
+      if (!storedUser?.token) {
+        setUser(null);
+        return;
+      }
+
+      try {
+        // Optional server validation
+        const res = await axios.get("/api/auth/validate", {
+          headers: { Authorization: `Bearer ${storedUser.token}` },
+        });
+
+        if (res.status === 200 && res.data.user) {
+          setUser(res.data.user);
+        } else {
+          setUser(null);
+          localStorage.removeItem("user");
+        }
+      } catch {
+        setUser(null);
+        localStorage.removeItem("user");
+      }
+    };
+
     window.addEventListener("authChange", handleAuth);
     window.addEventListener("storage", handleAuth);
+
+    // Run once on mount to check existing user
+    handleAuth();
+
     return () => {
       window.removeEventListener("authChange", handleAuth);
       window.removeEventListener("storage", handleAuth);
     };
   }, []);
+
+  // Update user on route change (for any direct changes)
+  useEffect(() => {
+    setUser(getUser());
+  }, [location.pathname]);
 
   const closeSidebar = () => setIsOpen(false);
 
@@ -79,16 +110,13 @@ export const Navbar = () => {
               onClick={() => handleScroll("home")}
               className="flex items-center gap-2 cursor-pointer group"
             >
-              {/* 🔥 GEM LOGO - PNG */}
               <div className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center">
                 <img
-                  src="/logo1.png" // make sure logo1.png is in the public folder
+                  src="/logo1.png"
                   alt="Local Gems Logo"
                   className="w-full h-full object-cover"
                 />
               </div>
-
-              {/* TEXT */}
               <h1 className="text-lg font-semibold tracking-tight">
                 <span className="text-gray-900">Local</span>
                 <span className="text-amber-500">Gems</span>
@@ -97,7 +125,7 @@ export const Navbar = () => {
           </div>
 
           {/* CENTER */}
-          <div className="flex justify-center">
+          <div className="flex justify-center gap-6">
             <button
               onClick={() => handleNavigate("/explore")}
               className={`text-sm font-medium transition ${
@@ -107,6 +135,17 @@ export const Navbar = () => {
               }`}
             >
               Explore
+            </button>
+
+            <button
+              onClick={() => handleNavigate("/event")}
+              className={`text-sm font-medium transition ${
+                location.pathname === "/event"
+                  ? "text-amber-500"
+                  : "text-gray-700 hover:text-amber-500"
+              }`}
+            >
+              Events
             </button>
           </div>
 
@@ -136,21 +175,17 @@ export const Navbar = () => {
 
       {/* SIDEBAR */}
       <div className={`fixed inset-0 z-50 ${isOpen ? "visible" : "invisible"}`}>
-        {/* OVERLAY */}
         <div
           onClick={closeSidebar}
           className={`absolute inset-0 bg-black/30 transition ${
             isOpen ? "opacity-100" : "opacity-0"
           }`}
         />
-
-        {/* PANEL */}
         <div
           className={`absolute right-0 top-0 h-full w-80 bg-white shadow-2xl transform transition-transform duration-300 ${
             isOpen ? "translate-x-0" : "translate-x-full"
           } flex flex-col`}
         >
-          {/* HEADER */}
           <div className="flex justify-between items-center px-6 py-4 border-b">
             <h2 className="text-base font-semibold text-gray-900">Menu</h2>
             <button
@@ -161,7 +196,6 @@ export const Navbar = () => {
             </button>
           </div>
 
-          {/* USER */}
           <div className="px-6 py-5 border-b">
             {user ? (
               <div
@@ -192,7 +226,6 @@ export const Navbar = () => {
             )}
           </div>
 
-          {/* MENU */}
           <div className="flex flex-col px-4 py-5 text-sm gap-1">
             <button
               onClick={() => handleScroll("home")}
@@ -214,7 +247,6 @@ export const Navbar = () => {
             </button>
           </div>
 
-          {/* LOGOUT */}
           {user && (
             <div className="mt-auto px-6 py-4 border-t">
               <button

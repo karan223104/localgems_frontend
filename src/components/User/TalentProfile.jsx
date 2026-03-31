@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
+import { Footer } from "../../pages/Footer";
 
 export const TalentProfile = () => {
 
-  // ── ALL HOOKS FIRST (Rules of Hooks — no early returns before this line) ──
   const navigate = useNavigate();
 
   const [user, setUser] = useState(() =>
@@ -30,6 +30,29 @@ export const TalentProfile = () => {
     country: "",
     portfolio: [],
   });
+
+  // review states
+  const [reviews, setReviews] = useState([]);
+  const [averageRating, setAverageRating] = useState(0);
+  const [totalReviews, setTotalReviews] = useState(0);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [showAllReviews, setShowAllReviews] = useState(false);
+
+  // applied events states
+  const [appliedEvents, setAppliedEvents] = useState([]);
+  const [appliedEventsLoading, setAppliedEventsLoading] = useState(false);
+
+  // ── BOOKING STATES ──
+  const [myBookings, setMyBookings] = useState([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [showBookModal, setShowBookModal] = useState(false);
+  const [showAllBookingsModal, setShowAllBookingsModal] = useState(false);
+  const [bookingSuccess, setBookingSuccess] = useState("");
+
+  // (providers booking this talent — not applicable on own profile, but modals still useful for viewing)
+  // The talent can Accept / Reject / Complete their own bookings here
+
+  const isTalent = user?.role === "talent";
 
   // Sync on login / logout
   useEffect(() => {
@@ -65,6 +88,81 @@ export const TalentProfile = () => {
     fetchProfile();
     return () => { cancelled = true; };
   }, [user?._id]);
+
+  // Fetch reviews
+  const fetchReviews = async (receiverId) => {
+    if (!receiverId) return;
+    try {
+      setReviewLoading(true);
+      const res = await axios.get(`/review/received/${receiverId}`);
+      setReviews(res.data.data || []);
+      setAverageRating(res.data.averageRating || 0);
+      setTotalReviews(res.data.totalReviews || 0);
+    } catch {
+      setReviews([]);
+      setAverageRating(0);
+      setTotalReviews(0);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profile && user?._id) {
+      fetchReviews(user._id);
+    }
+  }, [profile]);
+
+  // Fetch applied events
+  const fetchAppliedEvents = async (talentProfileId) => {
+    if (!talentProfileId) return;
+    try {
+      setAppliedEventsLoading(true);
+      const res = await axios.get(`/eventdetails/talent/${talentProfileId}`);
+      setAppliedEvents(res.data.data || []);
+    } catch (err) {
+      console.error("Error fetching applied events:", err);
+      setAppliedEvents([]);
+    } finally {
+      setAppliedEventsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profile?._id) {
+      fetchAppliedEvents(profile._id);
+    }
+  }, [profile?._id]);
+
+  // ── fetch bookings for this talent (own profile) ──
+  const fetchMyBookings = async () => {
+    if (!profile?._id) return;
+    try {
+      setBookingsLoading(true);
+      const res = await axios.get(`/booking/talent/${profile._id}`);
+      setMyBookings(res.data.data || []);
+    } catch {
+      setMyBookings([]);
+    } finally {
+      setBookingsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profile?._id) {
+      fetchMyBookings();
+    }
+  }, [profile?._id]);
+
+  // ── accept / reject / complete a booking ──
+  const handleBookingStatus = async (bookingId, status) => {
+    try {
+      await axios.put(`/booking/update/${bookingId}`, { status });
+      fetchMyBookings();
+    } catch {
+      // silent fail
+    }
+  };
 
   // ── END OF HOOKS ──
 
@@ -135,12 +233,17 @@ export const TalentProfile = () => {
     } finally { setSaving(false); }
   };
 
-  // ── CONDITIONAL RENDERS (all hooks done above) ──
+  const renderStars = (value, size = "text-base") => {
+    return Array.from({ length: 5 }, (_, i) => (
+      <span key={i} className={`${size} ${i < value ? "text-amber-400" : "text-gray-200"}`}>★</span>
+    ));
+  };
 
-  if (!user?._id) {
-    navigate("/");
-    return null;
-  }
+  useEffect(() => {
+    if (!user?._id) navigate("/");
+  }, [user?._id]);
+
+  if (!user?._id) return null;
 
   if (loading) {
     return (
@@ -158,9 +261,112 @@ export const TalentProfile = () => {
     Expert:       "bg-green-50 text-green-600 border-green-200",
   };
 
+  const appStatusColors = {
+    pending:  "bg-amber-50 text-amber-600 border-amber-200",
+    accepted: "bg-green-50 text-green-600 border-green-200",
+    rejected: "bg-red-50 text-red-500 border-red-200",
+  };
+
+  const appStatusIcon = {
+    pending:  "⏳",
+    accepted: "✅",
+    rejected: "❌",
+  };
+
+  const eventStatusDot = {
+    open:      "bg-green-500",
+    closed:    "bg-red-400",
+    completed: "bg-blue-500",
+    cancelled: "bg-gray-300",
+  };
+
+  const statusColors = {
+    pending:   "bg-yellow-50 text-yellow-600 border-yellow-200",
+    confirmed: "bg-green-50 text-green-600 border-green-200",
+    cancelled: "bg-red-50 text-red-500 border-red-200",
+    completed: "bg-blue-50 text-blue-600 border-blue-200",
+  };
+  const statusDot = {
+    pending:   "bg-yellow-400",
+    confirmed: "bg-green-500",
+    cancelled: "bg-red-400",
+    completed: "bg-blue-500",
+  };
+
   const inputCls = "w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-xl bg-white text-gray-900 placeholder:text-gray-300 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent transition";
   const labelCls = "block text-xs font-medium text-gray-500 mb-1.5";
   const sectionTitle = "text-[11px] font-semibold text-amber-500 uppercase tracking-widest pb-2.5 border-b border-gray-100 mb-4";
+
+  // ── Booking card (reusable) ──
+  const BookingCard = ({ booking }) => (
+    <div className="border border-gray-100 rounded-xl p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <span
+            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize mb-2 ${statusColors[booking.status]}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${statusDot[booking.status]}`} />
+            {booking.status}
+          </span>
+          <p className="text-sm font-semibold text-gray-800 truncate">
+            {booking.eventId?.title || "Event"}
+          </p>
+          <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
+            {booking.eventId?.location?.city && (
+              <span>📍 {booking.eventId.location.city}</span>
+            )}
+            {booking.bookingDate && (
+              <span>
+                📅{" "}
+                {new Date(booking.bookingDate).toLocaleDateString("en-IN", {
+                  day: "numeric", month: "short", year: "numeric",
+                })}
+              </span>
+            )}
+            {booking.providerId?.organizationName && (
+              <span>🏢 {booking.providerId.organizationName}</span>
+            )}
+          </div>
+          <p className="text-[10px] text-gray-300 mt-1">
+            Booked on{" "}
+            {new Date(booking.createdAt).toLocaleDateString("en-IN", {
+              day: "numeric", month: "short", year: "numeric",
+            })}
+          </p>
+        </div>
+
+        {/* Talent can accept / reject / complete their own bookings */}
+        {isTalent && (
+          <div className="flex flex-col gap-1.5 flex-shrink-0">
+            {booking.status === "pending" && (
+              <>
+                <button
+                  onClick={() => handleBookingStatus(booking._id, "confirmed")}
+                  className="text-[10px] font-semibold text-green-600 border border-green-200 px-2.5 py-1 rounded-lg"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={() => handleBookingStatus(booking._id, "cancelled")}
+                  className="text-[10px] font-semibold text-red-500 border border-red-200 px-2.5 py-1 rounded-lg"
+                >
+                  Reject
+                </button>
+              </>
+            )}
+            {booking.status === "confirmed" && (
+              <button
+                onClick={() => handleBookingStatus(booking._id, "completed")}
+                className="text-[10px] font-semibold text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg"
+              >
+                Complete
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -174,7 +380,6 @@ export const TalentProfile = () => {
           ← Back
         </button>
 
-        {/* ── EMPTY STATE ── */}
         {!profile ? (
           <div className="bg-white border border-gray-100 rounded-2xl shadow-sm text-center py-24 px-6">
             <div className="w-16 h-16 rounded-full bg-amber-50 border border-amber-100 flex items-center justify-center text-3xl mx-auto mb-5">
@@ -198,13 +403,10 @@ export const TalentProfile = () => {
 
             {/* ── HERO CARD ── */}
             <div className="bg-gray-900 rounded-2xl p-6 flex items-start gap-5 relative overflow-hidden shadow-lg">
-              {/* ambient glow */}
               <div className="absolute top-0 right-0 w-80 h-80 bg-amber-400/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-
               <div className="w-14 h-14 rounded-full bg-amber-500 flex items-center justify-center text-white font-bold text-xl flex-shrink-0 border-2 border-white/10">
                 {initials}
               </div>
-
               <div className="flex-1 min-w-0">
                 <h1 className="text-white font-bold text-lg tracking-tight">{user?.name}</h1>
                 <p className="text-gray-400 text-xs mt-0.5">{user?.email}</p>
@@ -227,7 +429,6 @@ export const TalentProfile = () => {
                   )}
                 </div>
               </div>
-
               <button
                 onClick={openModal}
                 className="flex-shrink-0 bg-white/10 hover:bg-white/15 text-white border border-white/10 px-4 py-2 rounded-xl text-xs font-medium transition-colors"
@@ -239,8 +440,8 @@ export const TalentProfile = () => {
             {/* ── STATS ── */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
-                { label: "Rating",      value: profile.ratingAverage?.toFixed(1) || "—" },
-                { label: "Reviews",     value: profile.totalReviews || 0 },
+                { label: "Rating",      value: averageRating ? parseFloat(averageRating).toFixed(1) : "—" },
+                { label: "Reviews",     value: totalReviews || 0 },
                 { label: "Experience",  value: `${profile.experience || 0} yrs` },
                 { label: "Hourly Rate", value: profile.hourlyRate ? `₹${profile.hourlyRate}` : "—" },
               ].map((s) => (
@@ -269,7 +470,6 @@ export const TalentProfile = () => {
 
             {/* ── PROFESSIONAL + PORTFOLIO ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
               <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Professional</p>
                 <div className="flex flex-col gap-2.5">
@@ -292,8 +492,7 @@ export const TalentProfile = () => {
                 {profile.portfolio?.length ? (
                   <div className="flex flex-col gap-2">
                     {profile.portfolio.map((u) => (
-                      <a
-                        key={u} href={ensureProtocol(u)} target="_blank" rel="noreferrer"
+                      <a key={u} href={ensureProtocol(u)} target="_blank" rel="noreferrer"
                         className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg hover:opacity-70 transition-opacity"
                       >
                         <span className="flex-shrink-0">🔗</span>
@@ -306,14 +505,330 @@ export const TalentProfile = () => {
                   <p className="text-xs text-gray-300">No portfolio links added.</p>
                 )}
               </div>
+            </div>
 
+            {/* ── BOOKINGS SECTION ── */}
+            <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                  Bookings
+                  {myBookings.length > 0 && (
+                    <span className="ml-2 text-amber-500">{myBookings.length}</span>
+                  )}
+                </p>
+                {myBookings.length > 1 && (
+                  <button
+                    onClick={() => setShowAllBookingsModal(true)}
+                    className="text-xs text-amber-600 font-semibold hover:text-amber-700 transition-colors"
+                  >
+                    View All ({myBookings.length})
+                  </button>
+                )}
+              </div>
+
+              {bookingSuccess && (
+                <p className="text-xs text-green-600 bg-green-50 border border-green-100 rounded-xl px-3 py-2 mb-3">
+                  {bookingSuccess}
+                </p>
+              )}
+
+              {bookingsLoading ? (
+                <div className="flex justify-center py-6">
+                  <div className="w-6 h-6 border-4 border-gray-200 border-t-amber-500 rounded-full animate-spin" />
+                </div>
+              ) : myBookings.length === 0 ? (
+                <p className="text-xs text-gray-300 text-center py-4">
+                  No bookings yet.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <BookingCard booking={myBookings[0]} />
+                  {myBookings.length > 1 && (
+                    <button
+                      onClick={() => setShowAllBookingsModal(true)}
+                      className="text-xs text-center text-gray-400 hover:text-amber-500 border border-dashed border-gray-200 hover:border-amber-300 rounded-xl py-2.5 transition-colors"
+                    >
+                      +{myBookings.length - 1} more booking{myBookings.length - 1 > 1 ? "s" : ""} — tap to view all
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── APPLIED EVENTS ── */}
+            <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Applied Events</p>
+                <span className="text-xs text-gray-400">{appliedEvents.length} total</span>
+              </div>
+
+              {appliedEventsLoading ? (
+                <div className="flex justify-center py-6">
+                  <div className="w-6 h-6 border-4 border-gray-200 border-t-amber-500 rounded-full animate-spin" />
+                </div>
+              ) : appliedEvents.length === 0 ? (
+                <p className="text-xs text-gray-300 text-center py-4">No events applied to yet.</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {appliedEvents.map((application) => {
+                    const ev = application.eventId;
+                    if (!ev) return null;
+                    return (
+                      <div key={application._id}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full border capitalize ${appStatusColors[application.status] || appStatusColors.pending}`}>
+                                <span>{appStatusIcon[application.status] || "⏳"}</span>
+                                {application.status}
+                              </span>
+                              {ev.status && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 capitalize">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${eventStatusDot[ev.status] || "bg-gray-300"}`} />
+                                  {ev.status}
+                                </span>
+                              )}
+                              {ev.skillRequired && (
+                                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
+                                  {ev.skillRequired}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm font-semibold text-gray-800 truncate">{ev.title}</p>
+                            <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
+                              {ev.location?.city && (
+                                <span>📍 {[ev.location.city, ev.location.state].filter(Boolean).join(", ")}</span>
+                              )}
+                              {ev.eventDate && (
+                                <span>📅 {new Date(ev.eventDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                              )}
+                              {ev.budget > 0 && (
+                                <span>💰 ₹{ev.budget.toLocaleString()}</span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-gray-300 mt-1.5">
+                              Applied {new Date(application.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                            </p>
+                          </div>
+                        </div>
+                        {application.status === "accepted" && (
+                          <div className="mt-3 px-3 py-2 bg-green-50 border border-green-100 rounded-lg">
+                            <p className="text-[11px] text-green-600 font-semibold">🎉 Congratulations! Your application was accepted.</p>
+                          </div>
+                        )}
+                        {application.status === "rejected" && (
+                          <div className="mt-3 px-3 py-2 bg-red-50 border border-red-100 rounded-lg">
+                            <p className="text-[11px] text-red-500 font-semibold">Unfortunately your application was not selected this time.</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── REVIEWS LIST ── */}
+            <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Reviews</p>
+                {totalReviews > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex">{renderStars(Math.round(averageRating))}</div>
+                    <span className="text-sm font-bold text-gray-800">{parseFloat(averageRating).toFixed(1)}</span>
+                    <span className="text-xs text-gray-400">({totalReviews})</span>
+                  </div>
+                )}
+              </div>
+
+              {reviewLoading ? (
+                <div className="flex justify-center py-6">
+                  <div className="w-6 h-6 border-4 border-gray-200 border-t-amber-500 rounded-full animate-spin" />
+                </div>
+              ) : reviews.length === 0 ? (
+                <p className="text-xs text-gray-300 text-center py-4">No reviews yet.</p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {reviews.slice(0, 1).map((review) => (
+                    <div key={review._id} className="border border-gray-100 rounded-xl p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center text-white font-bold text-xs">
+                            {(review.giverId?.name || "U").charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-gray-800">{review.giverId?.name || "Anonymous"}</p>
+                            <p className="text-[10px] text-gray-400 capitalize">{review.giverId?.role || "user"}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="flex justify-end">{renderStars(review.rating, "text-sm")}</div>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            {new Date(review.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                          </p>
+                        </div>
+                      </div>
+                      {review.comment && (
+                        <p className="text-xs text-gray-600 mt-2.5 leading-relaxed">{review.comment}</p>
+                      )}
+                    </div>
+                  ))}
+                  {reviews.length > 1 && (
+                    <button
+                      onClick={() => setShowAllReviews(true)}
+                      className="text-xs text-amber-600 font-semibold mt-2"
+                    >
+                      View All Reviews
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
           </div>
         )}
       </div>
 
-      {/* ── MODAL ── */}
+      {/* ── VIEW ALL REVIEWS MODAL ── */}
+      {showAllReviews && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[80vh] overflow-y-auto relative">
+            <button
+              onClick={() => setShowAllReviews(false)}
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+            <h3 className="text-sm font-bold mb-4">All Reviews</h3>
+            <div className="flex flex-col gap-4">
+              {reviews.map((review) => (
+                <div key={review._id} className="border border-gray-100 rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center text-white font-bold text-xs">
+                        {(review.giverId?.name || "U").charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-gray-800">{review.giverId?.name || "Anonymous"}</p>
+                        <p className="text-[10px] text-gray-400 capitalize">{review.giverId?.role || "user"}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex justify-end">{renderStars(review.rating, "text-sm")}</div>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {new Date(review.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      </p>
+                    </div>
+                  </div>
+                  {review.comment && (
+                    <p className="text-xs text-gray-600 mt-2.5 leading-relaxed">{review.comment}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ALL BOOKINGS MODAL ── */}
+      {showAllBookingsModal && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={(e) => e.target === e.currentTarget && setShowAllBookingsModal(false)}
+        >
+          <div className="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">All Bookings</h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {myBookings.length} booking{myBookings.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAllBookingsModal(false)}
+                className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 text-sm transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Booking list */}
+            <div className="overflow-y-auto px-6 py-5 flex flex-col gap-3 flex-1">
+              {myBookings.map((booking) => (
+                <div key={booking._id} className="border border-gray-100 rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize mb-2 ${statusColors[booking.status]}`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${statusDot[booking.status]}`} />
+                        {booking.status}
+                      </span>
+                      <p className="text-sm font-semibold text-gray-800 truncate">
+                        {booking.eventId?.title || "Event"}
+                      </p>
+                      <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
+                        {booking.eventId?.location?.city && (
+                          <span>📍 {booking.eventId.location.city}</span>
+                        )}
+                        {booking.bookingDate && (
+                          <span>
+                            📅{" "}
+                            {new Date(booking.bookingDate).toLocaleDateString("en-IN", {
+                              day: "numeric", month: "short", year: "numeric",
+                            })}
+                          </span>
+                        )}
+                        {booking.providerId?.organizationName && (
+                          <span>🏢 {booking.providerId.organizationName}</span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-300 mt-1">
+                        Booked on{" "}
+                        {new Date(booking.createdAt).toLocaleDateString("en-IN", {
+                          day: "numeric", month: "short", year: "numeric",
+                        })}
+                      </p>
+                    </div>
+
+                    {isTalent && (
+                      <div className="flex flex-col gap-1.5 flex-shrink-0">
+                        {booking.status === "pending" && (
+                          <>
+                            <button
+                              onClick={() => handleBookingStatus(booking._id, "confirmed")}
+                              className="text-[10px] font-semibold text-green-600 border border-green-200 px-2.5 py-1 rounded-lg"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleBookingStatus(booking._id, "cancelled")}
+                              className="text-[10px] font-semibold text-red-500 border border-red-200 px-2.5 py-1 rounded-lg"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {booking.status === "confirmed" && (
+                          <button
+                            onClick={() => handleBookingStatus(booking._id, "completed")}
+                            className="text-[10px] font-semibold text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg"
+                          >
+                            Complete
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT / CREATE MODAL ── */}
       {showModal && (
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
@@ -321,7 +836,6 @@ export const TalentProfile = () => {
         >
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
 
-            {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 rounded-t-2xl">
               <div>
                 <h2 className="text-base font-bold text-gray-900 tracking-tight">
@@ -337,10 +851,8 @@ export const TalentProfile = () => {
               </button>
             </div>
 
-            {/* Body */}
             <div className="overflow-y-auto px-6 py-5 flex flex-col gap-5 flex-1">
 
-              {/* Basic Info */}
               <div>
                 <p className={sectionTitle}>Basic Info</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -355,7 +867,6 @@ export const TalentProfile = () => {
                 </div>
               </div>
 
-              {/* Skills */}
               <div>
                 <p className={sectionTitle}>Skills</p>
                 <div className="flex gap-2">
@@ -366,10 +877,7 @@ export const TalentProfile = () => {
                     onChange={(e) => setSkillInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addSkill())}
                   />
-                  <button
-                    onClick={addSkill}
-                    className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200 text-sm font-medium rounded-xl flex-shrink-0 transition-colors"
-                  >
+                  <button onClick={addSkill} className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200 text-sm font-medium rounded-xl flex-shrink-0 transition-colors">
                     + Add
                   </button>
                 </div>
@@ -385,7 +893,6 @@ export const TalentProfile = () => {
                 )}
               </div>
 
-              {/* Professional */}
               <div>
                 <p className={sectionTitle}>Professional</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -420,7 +927,6 @@ export const TalentProfile = () => {
                 </div>
               </div>
 
-              {/* Location */}
               <div>
                 <p className={sectionTitle}>Location</p>
                 <div className="grid grid-cols-3 gap-3">
@@ -433,7 +939,6 @@ export const TalentProfile = () => {
                 </div>
               </div>
 
-              {/* Portfolio */}
               <div>
                 <p className={sectionTitle}>Portfolio Links</p>
                 <div className="flex gap-2">
@@ -444,10 +949,7 @@ export const TalentProfile = () => {
                     onChange={(e) => setPortfolioInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPortfolio())}
                   />
-                  <button
-                    onClick={addPortfolio}
-                    className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200 text-sm font-medium rounded-xl flex-shrink-0 transition-colors"
-                  >
+                  <button onClick={addPortfolio} className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200 text-sm font-medium rounded-xl flex-shrink-0 transition-colors">
                     + Add
                   </button>
                 </div>
@@ -465,19 +967,11 @@ export const TalentProfile = () => {
 
             </div>
 
-            {/* Footer */}
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 transition-colors"
-              >
+              <button onClick={() => setShowModal(false)} className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 transition-colors">
                 Cancel
               </button>
-              <button
-                onClick={handleSubmit}
-                disabled={saving}
-                className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-colors"
-              >
+              <button onClick={handleSubmit} disabled={saving} className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-colors">
                 {saving ? "Saving..." : profile ? "Update Profile" : "Create Profile"}
               </button>
             </div>
@@ -485,6 +979,7 @@ export const TalentProfile = () => {
           </div>
         </div>
       )}
+      <Footer />
     </div>
   );
 };

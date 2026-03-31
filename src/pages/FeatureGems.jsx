@@ -7,13 +7,37 @@ export const FeatureGems = () => {
 
   const [talents, setTalents] = useState([]);
 
-  // Fetch latest 5 talents
+  // Render stars helper
+  const renderStars = (value, size = "text-xs") => {
+    return Array.from({ length: 5 }, (_, i) => (
+      <span
+        key={i}
+        className={`${size} ${i < value ? "text-amber-400" : "text-gray-200"}`}
+      >
+        ★
+      </span>
+    ));
+  };
+
+  // Fetch latest 5 talents with ratings
   useEffect(() => {
     const fetchTalents = async () => {
       try {
         const res = await axios.get("/talent/all");
         const latest = res.data.data.slice(-5).reverse();
-        setTalents(latest);
+
+        const talentsWithRatings = await Promise.all(
+          latest.map(async (t) => {
+            try {
+              const reviewRes = await axios.get(`/review/received/${t.userId._id}`);
+              return { ...t, ratingAverage: reviewRes.data.averageRating || 0 };
+            } catch {
+              return { ...t, ratingAverage: 0 };
+            }
+          })
+        );
+
+        setTalents(talentsWithRatings);
       } catch (err) {
         console.log(err);
       }
@@ -25,10 +49,10 @@ export const FeatureGems = () => {
   return (
     <section className="relative bg-white py-16 px-4 sm:px-6 lg:px-8 font-[Inter] overflow-hidden">
 
-      {/* 🔥 subtle glow (like hero but light) */}
+      {/* 🔥 subtle glow */}
       <div className="absolute -top-24 left-0 w-[260px] h-[260px] bg-amber-400/10 blur-[100px] rounded-full" />
 
-      {/* 🔥 grid pattern (same style as hero/footer) */}
+      {/* 🔥 grid pattern */}
       <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(circle_at_1px_1px,black_1px,transparent_0)] bg-[length:28px_28px]" />
 
       <div className="max-w-7xl mx-auto relative z-10">
@@ -59,7 +83,6 @@ export const FeatureGems = () => {
 
         {/* CARDS */}
         <div className="flex gap-5 overflow-x-auto pb-4 -mx-4 px-4">
-
           {talents.length === 0 ? (
             <div className="text-gray-400 text-sm px-4">
               No talent available
@@ -92,25 +115,22 @@ export const FeatureGems = () => {
                 </div>
 
                 {/* INFO */}
-                <div className="flex justify-between items-center text-[11px] text-gray-400">
+                <div className="flex justify-between items-center text-[11px] text-gray-400 mb-2">
                   <span>
                     📍 {t.location?.city}, {t.location?.state}
                   </span>
 
-                  <span className="text-gray-700 font-medium">
-                    ⭐ {t.ratingAverage?.toFixed(1) || "—"}
-                  </span>
+                  <div className="flex items-center gap-1 text-gray-700 font-medium">
+                    <div>{renderStars(Math.round(t.ratingAverage))}</div>
+                    <span className="text-xs">{t.ratingAverage?.toFixed(1) || "—"}</span>
+                  </div>
                 </div>
 
                 {/* STATUS */}
                 <div className="mt-3">
                   <span
                     className={`text-[10px] px-2.5 py-1 rounded-full font-medium
-                    ${
-                      t.availability
-                        ? "bg-green-100 text-green-600"
-                        : "bg-gray-200 text-gray-500"
-                    }`}
+                    ${t.availability ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-500"}`}
                   >
                     {t.availability ? "Available" : "Unavailable"}
                   </span>
@@ -119,7 +139,6 @@ export const FeatureGems = () => {
               </div>
             ))
           )}
-
         </div>
 
       </div>
