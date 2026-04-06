@@ -11,6 +11,7 @@ import { Explore } from "../components/User/Explore";
 import { TalentDetails } from "../components/User/TalentDetails";
 import { Event } from "../components/User/Event";
 import { EventDetails } from "../components/User/EventDetails";
+import { PaymentPage } from "../components/User/PaymentPage";
 import AdminSidebar from "../components/admin/AdminSidebar";
 import { AllUser } from "../components/admin/AllUser";
 
@@ -18,8 +19,11 @@ import { AllUser } from "../components/admin/AllUser";
 const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
   { path: "/signup", element: <Signup /> },
-  {path:"/forgot-password", element:<ForgotPassword />},
-  {path:"/reset-password", element:<ResetPassword />},
+  { path:"/forgot-password", element:<ForgotPassword />},
+  { path:"/reset-password", element:<ResetPassword />},
+  { path:"/payment/:bookingId", element:<PaymentPage />},
+  { path:"/payment/event/:applicationId", element:<PaymentPage />},
+
 
   {
     path: "/", element: <Navbar />,

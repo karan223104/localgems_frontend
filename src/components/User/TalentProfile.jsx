@@ -41,16 +41,19 @@ export const TalentProfile = () => {
   // applied events states
   const [appliedEvents, setAppliedEvents] = useState([]);
   const [appliedEventsLoading, setAppliedEventsLoading] = useState(false);
+  const [showAllEventsModal, setShowAllEventsModal] = useState(false); // ← NEW
 
   // ── BOOKING STATES ──
   const [myBookings, setMyBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
-  const [showBookModal, setShowBookModal] = useState(false);
   const [showAllBookingsModal, setShowAllBookingsModal] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState("");
 
-  // (providers booking this talent — not applicable on own profile, but modals still useful for viewing)
-  // The talent can Accept / Reject / Complete their own bookings here
+  // ── PAYMENT STATES ──
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paidBookingIds, setPaidBookingIds] = useState(new Set());
+  const [showAllPaymentsModal, setShowAllPaymentsModal] = useState(false);
 
   const isTalent = user?.role === "talent";
 
@@ -154,6 +157,70 @@ export const TalentProfile = () => {
     }
   }, [profile?._id]);
 
+  // ── fetch payments for all bookings + event applications, build paidBookingIds + history ──
+  const fetchPaymentsAndHistory = async (bookingsList) => {
+    try {
+      setPaymentLoading(true);
+      const allPayments = [];
+      const paidIds = new Set();
+
+      // Fetch payments linked to bookings
+      if (bookingsList?.length) {
+        await Promise.all(
+          bookingsList.map(async (booking) => {
+            try {
+              const payRes = await axios.get(`/payment/booking/${booking._id}`);
+              const payments = Array.isArray(payRes.data) ? payRes.data : [];
+              payments.forEach((p) => {
+                allPayments.push({ ...p, booking });
+                if (p.paymentStatus === "completed")
+                  paidIds.add(String(booking._id));
+              });
+            } catch {
+              // no payments for this booking
+            }
+          }),
+        );
+      }
+
+      // Fetch payments linked to event applications (no booking)
+      if (appliedEvents?.length) {
+        await Promise.all(
+          appliedEvents
+            .filter((a) => a.status === "accepted")
+            .map(async (application) => {
+              try {
+                const payRes = await axios.get(`/payment/application/${application._id}`);
+                const payments = Array.isArray(payRes.data) ? payRes.data : [];
+                payments.forEach((p) => {
+                  // avoid duplicates
+                  if (!allPayments.find((x) => x._id === p._id)) {
+                    allPayments.push({ ...p, booking: { eventId: application.eventId } });
+                  }
+                });
+              } catch {
+                // no payments for this application
+              }
+            }),
+        );
+      }
+
+      allPayments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setPaymentHistory(allPayments);
+      setPaidBookingIds(paidIds);
+    } catch {
+      setPaymentHistory([]);
+      setPaidBookingIds(new Set());
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  // ── run payment fetch whenever bookings or applied events change ──
+  useEffect(() => {
+    fetchPaymentsAndHistory(myBookings);
+  }, [myBookings, appliedEvents]);
+
   // ── accept / reject / complete a booking ──
   const handleBookingStatus = async (bookingId, status) => {
     try {
@@ -161,6 +228,29 @@ export const TalentProfile = () => {
       fetchMyBookings();
     } catch {
       // silent fail
+    }
+  };
+
+  // ── navigate to payment page ──
+  const handlePayNow = (booking) => {
+    navigate(`/payment/${booking._id}`, { state: { booking } });
+  };
+
+  // ── navigate to payment page from accepted event ──
+  // First tries a real booking; if none, goes via application flow directly
+  const handlePayForEvent = (eventId, application) => {
+    const matchingBooking = myBookings.find(
+      (b) => String(b.eventId?._id || b.eventId) === String(eventId)
+    );
+    if (matchingBooking) {
+      // booking exists — use normal booking payment flow
+      navigate(`/payment/${matchingBooking._id}`, { state: { booking: matchingBooking } });
+    } else {
+      // no booking — go directly via application, PaymentPage handles it
+      const ev = application?.eventId;
+      navigate(`/payment/event/${application._id}`, {
+        state: { application, event: ev },
+      });
     }
   };
 
@@ -293,80 +383,264 @@ export const TalentProfile = () => {
     completed: "bg-blue-500",
   };
 
+  const paymentStatusColors = {
+    pending:   "bg-yellow-50 text-yellow-600 border-yellow-200",
+    completed: "bg-green-50 text-green-600 border-green-200",
+    failed:    "bg-red-50 text-red-500 border-red-200",
+    refunded:  "bg-purple-50 text-purple-600 border-purple-200",
+  };
+  const paymentStatusDot = {
+    pending:   "bg-yellow-400",
+    completed: "bg-green-500",
+    failed:    "bg-red-400",
+    refunded:  "bg-purple-500",
+  };
+  const methodIcons = { UPI: "📱", Card: "💳", NetBanking: "🏦", Cash: "💵" };
+
   const inputCls = "w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-xl bg-white text-gray-900 placeholder:text-gray-300 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent transition";
   const labelCls = "block text-xs font-medium text-gray-500 mb-1.5";
   const sectionTitle = "text-[11px] font-semibold text-amber-500 uppercase tracking-widest pb-2.5 border-b border-gray-100 mb-4";
 
-  // ── Booking card (reusable) ──
-  const BookingCard = ({ booking }) => (
+  // ── Payment Card (reusable) ──
+  const PaymentCard = ({ payment }) => (
     <div className="border border-gray-100 rounded-xl p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <span
-            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize mb-2 ${statusColors[booking.status]}`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${statusDot[booking.status]}`} />
-            {booking.status}
-          </span>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${paymentStatusColors[payment.paymentStatus] || paymentStatusColors.pending}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${paymentStatusDot[payment.paymentStatus] || paymentStatusDot.pending}`} />
+              {payment.paymentStatus}
+            </span>
+            <span className="text-[10px] text-gray-400">
+              {methodIcons[payment.paymentMethod]} {payment.paymentMethod}
+            </span>
+          </div>
           <p className="text-sm font-semibold text-gray-800 truncate">
-            {booking.eventId?.title || "Event"}
+            {payment.booking?.eventId?.title || "Event"}
           </p>
           <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
-            {booking.eventId?.location?.city && (
-              <span>📍 {booking.eventId.location.city}</span>
+            {payment.payerId?.name && (
+              <span>👤 {payment.payerId.name}</span>
             )}
-            {booking.bookingDate && (
+            {payment.transactionId && (
+              <span className="font-mono">#{payment.transactionId}</span>
+            )}
+            {payment.paymentDate && (
               <span>
                 📅{" "}
-                {new Date(booking.bookingDate).toLocaleDateString("en-IN", {
+                {new Date(payment.paymentDate).toLocaleDateString("en-IN", {
                   day: "numeric", month: "short", year: "numeric",
                 })}
               </span>
             )}
-            {booking.providerId?.organizationName && (
-              <span>🏢 {booking.providerId.organizationName}</span>
-            )}
           </div>
           <p className="text-[10px] text-gray-300 mt-1">
-            Booked on{" "}
-            {new Date(booking.createdAt).toLocaleDateString("en-IN", {
+            Recorded on{" "}
+            {new Date(payment.createdAt).toLocaleDateString("en-IN", {
               day: "numeric", month: "short", year: "numeric",
             })}
           </p>
         </div>
-
-        {/* Talent can accept / reject / complete their own bookings */}
-        {isTalent && (
-          <div className="flex flex-col gap-1.5 flex-shrink-0">
-            {booking.status === "pending" && (
-              <>
-                <button
-                  onClick={() => handleBookingStatus(booking._id, "confirmed")}
-                  className="text-[10px] font-semibold text-green-600 border border-green-200 px-2.5 py-1 rounded-lg"
-                >
-                  Accept
-                </button>
-                <button
-                  onClick={() => handleBookingStatus(booking._id, "cancelled")}
-                  className="text-[10px] font-semibold text-red-500 border border-red-200 px-2.5 py-1 rounded-lg"
-                >
-                  Reject
-                </button>
-              </>
-            )}
-            {booking.status === "confirmed" && (
-              <button
-                onClick={() => handleBookingStatus(booking._id, "completed")}
-                className="text-[10px] font-semibold text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg"
-              >
-                Complete
-              </button>
-            )}
-          </div>
-        )}
+        <div className="flex-shrink-0 text-right">
+          <p className={`text-base font-bold ${payment.paymentStatus === "completed" ? "text-green-600" : payment.paymentStatus === "refunded" ? "text-purple-500" : "text-gray-400"}`}>
+            ₹{payment.amount?.toLocaleString("en-IN")}
+          </p>
+        </div>
       </div>
     </div>
   );
+
+  // ── Booking card with Pay Now / ✓ Paid ──
+  const BookingCard = ({ booking, inModal = false }) => {
+    const alreadyPaid = paidBookingIds.has(String(booking._id));
+    return (
+      <div className="border border-gray-100 rounded-xl p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize mb-2 ${statusColors[booking.status]}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${statusDot[booking.status]}`} />
+              {booking.status}
+            </span>
+            <p className="text-sm font-semibold text-gray-800 truncate">
+              {booking.eventId?.title || "Event"}
+            </p>
+            <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
+              {booking.eventId?.location?.city && (
+                <span>📍 {booking.eventId.location.city}</span>
+              )}
+              {booking.bookingDate && (
+                <span>
+                  📅{" "}
+                  {new Date(booking.bookingDate).toLocaleDateString("en-IN", {
+                    day: "numeric", month: "short", year: "numeric",
+                  })}
+                </span>
+              )}
+              {booking.providerId?.organizationName && (
+                <span>🏢 {booking.providerId.organizationName}</span>
+              )}
+            </div>
+            <p className="text-[10px] text-gray-300 mt-1">
+              Booked on{" "}
+              {new Date(booking.createdAt).toLocaleDateString("en-IN", {
+                day: "numeric", month: "short", year: "numeric",
+              })}
+            </p>
+          </div>
+
+          {isTalent && (
+            <div className="flex flex-col gap-1.5 flex-shrink-0">
+              {booking.status === "pending" && (
+                <>
+                  <button
+                    onClick={() => handleBookingStatus(booking._id, "confirmed")}
+                    className="text-[10px] font-semibold text-green-600 border border-green-200 px-2.5 py-1 rounded-lg"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => handleBookingStatus(booking._id, "cancelled")}
+                    className="text-[10px] font-semibold text-red-500 border border-red-200 px-2.5 py-1 rounded-lg"
+                  >
+                    Reject
+                  </button>
+                </>
+              )}
+              {booking.status === "confirmed" && (
+                <button
+                  onClick={() => handleBookingStatus(booking._id, "completed")}
+                  className="text-[10px] font-semibold text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg"
+                >
+                  Complete
+                </button>
+              )}
+              {booking.status === "confirmed" && !alreadyPaid && (
+                <button
+                  onClick={() => {
+                    if (inModal) setShowAllBookingsModal(false);
+                    handlePayNow(booking);
+                  }}
+                  className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 px-2.5 py-1 rounded-lg transition-colors"
+                >
+                  Pay Now
+                </button>
+              )}
+              {booking.status === "confirmed" && alreadyPaid && (
+                <span className="text-[10px] font-semibold text-green-600 bg-green-50 border border-green-200 px-2.5 py-1 rounded-lg">
+                  ✓ Paid
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const AppliedEventCard = ({ application, inModal = false }) => {
+    const ev = application.eventId;
+    if (!ev) return null;
+
+    const eventId = ev._id || ev;
+
+    // Keep booking logic intact for booking-based pay/paid
+    const matchingBooking = myBookings.find(
+      (b) => String(b.eventId?._id || b.eventId) === String(eventId)
+    );
+    const bookingPaid = matchingBooking
+      ? paidBookingIds.has(String(matchingBooking._id))
+      : false;
+
+    // Also check paymentHistory directly by eventId or applicationId
+    const eventPaid = paymentHistory.some(
+      (p) =>
+        p.paymentStatus === "completed" &&
+        (String(p.booking?.eventId?._id || p.booking?.eventId) === String(eventId) ||
+          String(p.eventId?._id || p.eventId) === String(eventId) ||
+          String(p.applicationId) === String(application._id))
+    );
+
+    const alreadyPaid = bookingPaid || eventPaid;
+
+    const showPayButton = application.status === "accepted" && !alreadyPaid;
+    const showPaidBadge = application.status === "accepted" && alreadyPaid;
+
+    return (
+      <div className="border border-gray-100 rounded-xl p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full border capitalize ${appStatusColors[application.status] || appStatusColors.pending}`}>
+                <span>{appStatusIcon[application.status] || "⏳"}</span>
+                {application.status}
+              </span>
+              {ev.status && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 capitalize">
+                  <span className={`w-1.5 h-1.5 rounded-full ${eventStatusDot[ev.status] || "bg-gray-300"}`} />
+                  {ev.status}
+                </span>
+              )}
+              {ev.skillRequired && (
+                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
+                  {ev.skillRequired}
+                </span>
+              )}
+            </div>
+            <p className="text-sm font-semibold text-gray-800 truncate">{ev.title}</p>
+            <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
+              {ev.location?.city && (
+                <span>📍 {[ev.location.city, ev.location.state].filter(Boolean).join(", ")}</span>
+              )}
+              {ev.eventDate && (
+                <span>📅 {new Date(ev.eventDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+              )}
+              {ev.budget > 0 && (
+                <span>💰 ₹{ev.budget.toLocaleString()}</span>
+              )}
+            </div>
+            <p className="text-[10px] text-gray-300 mt-1.5">
+              Applied {new Date(application.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            </p>
+          </div>
+
+          {/* Pay Now / ✓ Paid badge */}
+          <div className="flex-shrink-0">
+            {showPayButton && (
+              <button
+                onClick={() => {
+                  if (inModal) setShowAllEventsModal(false);
+                  handlePayForEvent(eventId, application);
+                }}
+                className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Pay Now
+              </button>
+            )}
+            {showPaidBadge && (
+              <span className="text-[10px] font-semibold text-green-600 bg-green-50 border border-green-200 px-2.5 py-1 rounded-lg">
+                ✓ Paid
+              </span>
+            )}
+          </div>
+        </div>
+
+        {application.status === "accepted" && (
+          <div className="mt-3 px-3 py-2 bg-green-50 border border-green-100 rounded-lg">
+            <p className="text-[11px] text-green-600 font-semibold">🎉 Congratulations! Your application was accepted.</p>
+          </div>
+        )}
+        {application.status === "rejected" && (
+          <div className="mt-3 px-3 py-2 bg-red-50 border border-red-100 rounded-lg">
+            <p className="text-[11px] text-red-500 font-semibold">Unfortunately your application was not selected this time.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -555,11 +829,65 @@ export const TalentProfile = () => {
               )}
             </div>
 
+            {/* ── PAYMENT HISTORY ── */}
+            <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                {/* ← CHANGE 3: removed total received amount, only show label + count */}
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                  Payment History
+                  {paymentHistory.length > 0 && (
+                    <span className="ml-2 text-amber-500">{paymentHistory.length}</span>
+                  )}
+                </p>
+                {paymentHistory.length > 1 && (
+                  <button
+                    onClick={() => setShowAllPaymentsModal(true)}
+                    className="text-xs text-amber-600 font-semibold hover:text-amber-700 transition-colors"
+                  >
+                    View All ({paymentHistory.length})
+                  </button>
+                )}
+              </div>
+
+              {paymentLoading ? (
+                <div className="flex justify-center py-6">
+                  <div className="w-6 h-6 border-4 border-gray-200 border-t-amber-500 rounded-full animate-spin" />
+                </div>
+              ) : paymentHistory.length === 0 ? (
+                <p className="text-xs text-gray-300 text-center py-4">No payments received yet.</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <PaymentCard payment={paymentHistory[0]} />
+                  {paymentHistory.length > 1 && (
+                    <button
+                      onClick={() => setShowAllPaymentsModal(true)}
+                      className="text-xs text-center text-gray-400 hover:text-amber-500 border border-dashed border-gray-200 hover:border-amber-300 rounded-xl py-2.5 transition-colors"
+                    >
+                      +{paymentHistory.length - 1} more payment{paymentHistory.length - 1 > 1 ? "s" : ""} — tap to view all
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* ── APPLIED EVENTS ── */}
             <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Applied Events</p>
-                <span className="text-xs text-gray-400">{appliedEvents.length} total</span>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                  Applied Events
+                  {appliedEvents.length > 0 && (
+                    <span className="ml-2 text-amber-500">{appliedEvents.length}</span>
+                  )}
+                </p>
+                {/* ← CHANGE 1: View All button when more than 1 event */}
+                {appliedEvents.length > 1 && (
+                  <button
+                    onClick={() => setShowAllEventsModal(true)}
+                    className="text-xs text-amber-600 font-semibold hover:text-amber-700 transition-colors"
+                  >
+                    View All ({appliedEvents.length})
+                  </button>
+                )}
               </div>
 
               {appliedEventsLoading ? (
@@ -570,60 +898,16 @@ export const TalentProfile = () => {
                 <p className="text-xs text-gray-300 text-center py-4">No events applied to yet.</p>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {appliedEvents.map((application) => {
-                    const ev = application.eventId;
-                    if (!ev) return null;
-                    return (
-                      <div key={application._id}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap gap-1.5 mb-2">
-                              <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full border capitalize ${appStatusColors[application.status] || appStatusColors.pending}`}>
-                                <span>{appStatusIcon[application.status] || "⏳"}</span>
-                                {application.status}
-                              </span>
-                              {ev.status && (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 capitalize">
-                                  <span className={`w-1.5 h-1.5 rounded-full ${eventStatusDot[ev.status] || "bg-gray-300"}`} />
-                                  {ev.status}
-                                </span>
-                              )}
-                              {ev.skillRequired && (
-                                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
-                                  {ev.skillRequired}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-sm font-semibold text-gray-800 truncate">{ev.title}</p>
-                            <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
-                              {ev.location?.city && (
-                                <span>📍 {[ev.location.city, ev.location.state].filter(Boolean).join(", ")}</span>
-                              )}
-                              {ev.eventDate && (
-                                <span>📅 {new Date(ev.eventDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
-                              )}
-                              {ev.budget > 0 && (
-                                <span>💰 ₹{ev.budget.toLocaleString()}</span>
-                              )}
-                            </div>
-                            <p className="text-[10px] text-gray-300 mt-1.5">
-                              Applied {new Date(application.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                            </p>
-                          </div>
-                        </div>
-                        {application.status === "accepted" && (
-                          <div className="mt-3 px-3 py-2 bg-green-50 border border-green-100 rounded-lg">
-                            <p className="text-[11px] text-green-600 font-semibold">🎉 Congratulations! Your application was accepted.</p>
-                          </div>
-                        )}
-                        {application.status === "rejected" && (
-                          <div className="mt-3 px-3 py-2 bg-red-50 border border-red-100 rounded-lg">
-                            <p className="text-[11px] text-red-500 font-semibold">Unfortunately your application was not selected this time.</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {/* Show only the first event inline */}
+                  <AppliedEventCard application={appliedEvents[0]} />
+                  {appliedEvents.length > 1 && (
+                    <button
+                      onClick={() => setShowAllEventsModal(true)}
+                      className="text-xs text-center text-gray-400 hover:text-amber-500 border border-dashed border-gray-200 hover:border-amber-300 rounded-xl py-2.5 transition-colors"
+                    >
+                      +{appliedEvents.length - 1} more event{appliedEvents.length - 1 > 1 ? "s" : ""} — tap to view all
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -737,7 +1021,6 @@ export const TalentProfile = () => {
           onClick={(e) => e.target === e.currentTarget && setShowAllBookingsModal(false)}
         >
           <div className="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col">
-            {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div>
                 <h3 className="text-base font-bold text-gray-900">All Bookings</h3>
@@ -752,76 +1035,73 @@ export const TalentProfile = () => {
                 ✕
               </button>
             </div>
-
-            {/* Booking list */}
             <div className="overflow-y-auto px-6 py-5 flex flex-col gap-3 flex-1">
               {myBookings.map((booking) => (
-                <div key={booking._id} className="border border-gray-100 rounded-xl p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <span
-                        className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize mb-2 ${statusColors[booking.status]}`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusDot[booking.status]}`} />
-                        {booking.status}
-                      </span>
-                      <p className="text-sm font-semibold text-gray-800 truncate">
-                        {booking.eventId?.title || "Event"}
-                      </p>
-                      <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-gray-400">
-                        {booking.eventId?.location?.city && (
-                          <span>📍 {booking.eventId.location.city}</span>
-                        )}
-                        {booking.bookingDate && (
-                          <span>
-                            📅{" "}
-                            {new Date(booking.bookingDate).toLocaleDateString("en-IN", {
-                              day: "numeric", month: "short", year: "numeric",
-                            })}
-                          </span>
-                        )}
-                        {booking.providerId?.organizationName && (
-                          <span>🏢 {booking.providerId.organizationName}</span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-gray-300 mt-1">
-                        Booked on{" "}
-                        {new Date(booking.createdAt).toLocaleDateString("en-IN", {
-                          day: "numeric", month: "short", year: "numeric",
-                        })}
-                      </p>
-                    </div>
+                <BookingCard key={booking._id} booking={booking} inModal={true} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
-                    {isTalent && (
-                      <div className="flex flex-col gap-1.5 flex-shrink-0">
-                        {booking.status === "pending" && (
-                          <>
-                            <button
-                              onClick={() => handleBookingStatus(booking._id, "confirmed")}
-                              className="text-[10px] font-semibold text-green-600 border border-green-200 px-2.5 py-1 rounded-lg"
-                            >
-                              Accept
-                            </button>
-                            <button
-                              onClick={() => handleBookingStatus(booking._id, "cancelled")}
-                              className="text-[10px] font-semibold text-red-500 border border-red-200 px-2.5 py-1 rounded-lg"
-                            >
-                              Reject
-                            </button>
-                          </>
-                        )}
-                        {booking.status === "confirmed" && (
-                          <button
-                            onClick={() => handleBookingStatus(booking._id, "completed")}
-                            className="text-[10px] font-semibold text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg"
-                          >
-                            Complete
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
+      {/* ── ALL PAYMENTS MODAL ── */}
+      {showAllPaymentsModal && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={(e) => e.target === e.currentTarget && setShowAllPaymentsModal(false)}
+        >
+          <div className="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Payment History</h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {paymentHistory.length} payment{paymentHistory.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAllPaymentsModal(false)}
+                className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 text-sm transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto px-6 py-5 flex flex-col gap-3 flex-1">
+              {paymentHistory.map((payment) => (
+                <PaymentCard key={payment._id} payment={payment} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ALL APPLIED EVENTS MODAL ── */}
+      {showAllEventsModal && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={(e) => e.target === e.currentTarget && setShowAllEventsModal(false)}
+        >
+          <div className="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Applied Events</h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {appliedEvents.length} event{appliedEvents.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAllEventsModal(false)}
+                className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 text-sm transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto px-6 py-5 flex flex-col gap-3 flex-1">
+              {appliedEvents.map((application) => (
+                <AppliedEventCard
+                  key={application._id}
+                  application={application}
+                  inModal={true}
+                />
               ))}
             </div>
           </div>
